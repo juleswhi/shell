@@ -1,4 +1,3 @@
-// main.zig
 const std = @import("std");
 const os = std.os;
 const system = std.os.system;
@@ -14,10 +13,6 @@ pub fn main() !void {
     const stderr = std.io.getStdErr();
     const stdin_reader = stdin.reader();
 
-    // Save original terminal settings
-
-    // Save original terminal settings using Linux syscall
-
     var original_termios: linux.termios = undefined;
     const tcget_ret = linux.tcgetattr(stdin.handle, &original_termios);
     if (tcget_ret < 0) return os.errno(-tcget_ret);
@@ -26,10 +21,9 @@ pub fn main() !void {
         _ = linux.tcsetattr(stdin.handle, .FLUSH, &original_termios);
     }
 
-    // Configure raw terminal mode
     var raw_termios = original_termios;
     raw_termios.lflag.ICANON = false;
-    raw_termios.lflag.ECHO = true;
+    raw_termios.lflag.ECHO = false;
     raw_termios.cc[@intFromEnum(linux.V.TIME)] = 0;
     raw_termios.cc[@intFromEnum(linux.V.MIN)] = 1;
 
@@ -40,9 +34,8 @@ pub fn main() !void {
     var input_index: usize = 0;
 
     while (true) {
-        try out.outPrompt(try getUsername());
+        try out.prompt(try getUsername());
 
-        // Read input character by character
         while (true) {
             const char = stdin_reader.readByte() catch |err| {
                 if (err == error.EndOfStream) continue;
@@ -50,35 +43,40 @@ pub fn main() !void {
             };
 
             switch (char) {
-                '\n' => { // Enter key
+                '\n' => {
                     input_buffer[input_index] = 0;
                     const input = input_buffer[0..input_index];
+                    try out.line();
                     input_index = 0;
 
-                    // Process command
                     try processInput(input);
                     break;
+                },
+                '\\' => {
+                    try out.print("\\");
                 },
                 0x7F => { // Backspace
                     if (input_index > 0) {
                         input_index -= 1;
-                        try stderr.writeAll("\x08 \x08"); // Erase character
+                        try out.backspace();
                     }
                 },
                 0x0C => { // Ctrl+L
                     try clearScreen();
-                    try out.outPrompt(try getUsername());
+                    try out.prompt(try getUsername());
                     try stderr.writeAll(input_buffer[0..input_index]);
                 },
                 0x03 => { // Ctrl+C
                     input_index = 0;
                     try stderr.writeAll("^C\n");
-                    try out.outPrompt(try getUsername());
+                    try out.prompt(try getUsername());
                 },
                 else => {
                     if (input_index < input_buffer.len - 1 and char >= 0x20 and char <= 0x7E) {
                         input_buffer[input_index] = char;
                         input_index += 1;
+                        const b: [1]u8 = [_]u8{char};
+                        _ = try out.write(&b);
                     }
                 },
             }
@@ -87,8 +85,7 @@ pub fn main() !void {
 }
 
 fn processInput(input: []const u8) !void {
-    // Your command processing logic here
-    try out.outErr(try parse(input));
+    try out.err(try parse(input));
 }
 
 fn clearScreen() !void {
