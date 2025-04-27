@@ -16,6 +16,3 @@ pub fn outErr(str: []const u8) !void {
 pub fn outPrompt(str: []const u8) !void {
     try WRITER.print("[{s}] $ ", .{str});
 }
-
-pub fn inStd() ![]const u8 {
-}
