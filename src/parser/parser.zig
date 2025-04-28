@@ -11,7 +11,7 @@ pub const twsh_err = error{
 
 pub fn parse(str: []const u8) ![]const u8 {
     _ = str;
-    const executables = try getExecutables(std.heap.page_allocator);
+    const executables = try getExecutablesInPath(std.heap.page_allocator);
     defer {
         for (executables.items) |exe| {
             std.heap.page_allocator.free(exe);
@@ -26,43 +26,26 @@ pub fn parse(str: []const u8) ![]const u8 {
     return fmt.err("command not found");
 }
 
-pub fn getExecutables(allocator: mem.Allocator) !ArrayList([]const u8) {
-    var executables = ArrayList([]const u8).init(allocator);
-    errdefer executables.deinit();
+pub fn getExecutablesInPath(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
+    const path_var = std.process.getEnvVarOwned(allocator, "PATH") catch return error.MissingPath;
+    defer allocator.free(path_var);
 
-    const path_env = std.process.getEnvVarOwned(std.heap.page_allocator, "PATH") catch return error.NotPathFound;
-    var dirs = mem.splitAny(u8, path_env, ":");
+    var path_list = std.ArrayList([]const u8).init(allocator);
+    errdefer path_list.deinit();
 
-    while (dirs.next()) |dir_path| {
-        if (dir_path.len == 0) continue;
-
-        var dir = fs.openDirAbsolute(dir_path, .{}) catch unreachable;
+    var split_iter = std.mem.splitSequence(u8, path_var, ":");
+    while (split_iter.next()) |path| {
+        var dir = try std.fs.openDirAbsolute(path, .{});
         defer dir.close();
 
-        var iter = dir.iterate();
-        while (true) {
-            const maybe_entry = iter.next();
-            if (maybe_entry) |entry_opt| {
-                if (entry_opt) |entry| {
-                    const full_path = fs.path.join(allocator, &[_][]const u8{ dir_path, entry.name }) catch |err| {
-                        // Handle allocation error (e.g., out of memory)
-                        return err;
-                    };
-                    defer allocator.free(full_path);
-
-                    executables.append(full_path) catch |err| {
-                        allocator.free(full_path);
-                        return err;
-                    };
-                } else {
-                    break;
-                }
-            } else |_| {
-                // Skip entry on error
-                continue;
+        var dir_iter = dir.iterate();
+        while (try dir_iter.next()) |entry| {
+            if (entry.kind == .file) {
+                std.debug.print("{s}\n", .{entry.name});
             }
         }
     }
 
-    return executables;
+    return path_list;
 }
+
